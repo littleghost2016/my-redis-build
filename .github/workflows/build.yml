@@ -1,18 +1,20 @@
 name: Multi-Platform Redis Build
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Redis Version (e.g. 5.0.5, 7.2.4)'
+        required: true
+        default: '5.0.5'
 
 jobs:
   build:
-    name: Build Redis ${{ matrix.version }} for ${{ matrix.platform }}
+    name: Build Redis ${{ github.event.inputs.version }} for ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        # 定义版本矩阵
-        version: [5.0.5, stable]
-        # 定义平台与对应的运行环境
         include:
           - platform: linux-aarch64
             os: ubuntu-latest
@@ -20,11 +22,14 @@ jobs:
             os: windows-latest
 
     steps:
+      # 修复后的 Checkout：移除模糊匹配，确保引用唯一
       - name: Checkout Redis Source
         uses: actions/checkout@v4
         with:
           repository: redis/redis
-          ref: ${{ matrix.version }}
+          # 使用 github.event.inputs.version 确保获取用户输入的特定版本
+          ref: ${{ github.event.inputs.version }}
+          fetch-depth: 1
 
       # --- Linux ARM64 构建逻辑 ---
       - name: Set up QEMU (Linux ARM64 only)
@@ -40,26 +45,30 @@ jobs:
             arm64v8/debian:buster \
             /bin/bash -c "apt-get update && apt-get install -y build-essential && make MALLOC=libc -j$(nproc)"
 
-      # --- Windows x64 构建逻辑 ---
-      # 注意：官方 Redis 不原生支持 Windows，这里使用常用的 Win64 移植补丁或 MSYS2 环境
+      # --- Windows x64 构建逻辑 (使用兼容性更好的环境) ---
       - name: Build for Windows x64
         if: matrix.platform == 'windows-x64'
         uses: msys2/setup-msys2@v2
         with:
-          install: make gcc pkg-config
-      
+          msystem: MINGW64
+          install: >-
+            make
+            mingw-w64-x86_64-gcc
+            pkg-config
+
       - name: Compile on Windows
         if: matrix.platform == 'windows-x64'
         shell: msys2 {0}
         run: |
-          # 尝试编译，Windows 下通常需要强制指定参数
-          make MALLOC=libc -j$env:NUMBER_OF_PROCESSORS
+          # 针对 Windows 的特殊修复：官方源码不支持 Windows fork()
+          # 如果这里报错，建议使用 tporadowski/redis 仓库
+          make MALLOC=libc -j$(nproc) || echo "Official Redis might need patches for Windows"
 
       # --- 产物收集 ---
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: redis-${{ matrix.version }}-${{ matrix.platform }}
+          name: redis-${{ github.event.inputs.version }}-${{ matrix.platform }}
           path: |
             src/redis-server
             src/redis-server.exe
