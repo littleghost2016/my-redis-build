@@ -1,64 +1,55 @@
-name: Build Redis 7.4 ARM64
+name: Build Redis 7.4 for Kylin V10 (GLIBC 2.28)
 
 on:
-  workflow_dispatch: # 手动触发构建
+  push:
+    branches:
+      - main  # 当 main 分支有代码推送时触发
+  workflow_dispatch: # 保留手动触发按钮
 
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
     
+    # 使用 Docker 容器环境，确保编译环境的 GLIBC 为 2.28
+    container:
+      image: debian:10
+    
     steps:
-      # --- 1. 安装 ARM64 交叉编译工具链 ---
-      - name: Install ARM64 Toolchain
+      - name: Install Dependencies
         run: |
-          sudo apt-get update
-          # 安装 C 和 C++ 的交叉编译器，以及 binutils 工具包（包含 ar, ranlib 等）
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            build-essential
+            build-essential \
+            git
 
-      # --- 2. 显式克隆 7.4 稳定分支 ---
       - name: Manual Clone Redis 7.4
         run: |
-          # 克隆 7.4 分支，深度为 1 以加快下载速度
           git clone --depth 1 --branch 7.4 https://github.com/redis/redis.git source
       
-      # --- 3. 核心编译步骤 ---
       - name: Compile Redis for ARM64
         working-directory: ./source
         run: |
-          # 获取 CPU 核心数
-          CPU_CORES=$(nproc)
-          
-          # 关键点：将所有的构建工具都指向 aarch64 版本
-          # 1. CC/CXX: 确保 C 和 C++ 代码（如 fast_float）都编译为 ARM 架构
-          # 2. AR/RANLIB: 确保生成的 .a 静态库也是 ARM 架构，解决 EM: 62 冲突
-          # 3. MALLOC=libc: 避免 jemalloc 在交叉编译时的页大小匹配问题
-          
+          # 显式指定工具链，确保三方库（如 fast_float）不走宿主机的编译器
           make \
             CC=aarch64-linux-gnu-gcc \
             CXX=aarch64-linux-gnu-g++ \
             AR=aarch64-linux-gnu-ar \
             RANLIB=aarch64-linux-gnu-ranlib \
             MALLOC=libc \
-            -j$CPU_CORES
+            -j$(nproc)
 
-      # --- 4. 验证架构 (防止传错文件) ---
-      - name: Verify Architecture
+      - name: Verify GLIBC Dependency
         run: |
-          file source/src/redis-server
-          # 预期输出应包含: ELF 64-bit LSB executable, ARM aarch64
+          # 检查生成的二进制文件依赖的 GLIBC 版本
+          objdump -p source/src/redis-server | grep GLIBC
 
-      # --- 5. 上传产物 ---
       - name: Upload ARM64 Binaries
         uses: actions/upload-artifact@v4
         with:
-          name: redis-7.4-linux-arm64
+          name: redis-7.4-kylin-v10-arm64
           path: |
             source/src/redis-server
             source/src/redis-cli
-            source/src/redis-benchmark
-            source/src/redis-check-rdb
-            source/src/redis-check-aof
