@@ -1,0 +1,67 @@
+name: Multi-Platform Redis Build
+
+on:
+  workflow_dispatch: # 手动触发
+
+jobs:
+  build:
+    name: Build Redis ${{ matrix.version }} for ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 定义版本矩阵
+        version: [5.0.5, stable]
+        # 定义平台与对应的运行环境
+        include:
+          - platform: linux-aarch64
+            os: ubuntu-latest
+          - platform: windows-x64
+            os: windows-latest
+
+    steps:
+      - name: Checkout Redis Source
+        uses: actions/checkout@v4
+        with:
+          repository: redis/redis
+          ref: ${{ matrix.version }}
+
+      # --- Linux ARM64 构建逻辑 ---
+      - name: Set up QEMU (Linux ARM64 only)
+        if: matrix.platform == 'linux-aarch64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build for Linux ARM64
+        if: matrix.platform == 'linux-aarch64'
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            arm64v8/debian:buster \
+            /bin/bash -c "apt-get update && apt-get install -y build-essential && make MALLOC=libc -j$(nproc)"
+
+      # --- Windows x64 构建逻辑 ---
+      # 注意：官方 Redis 不原生支持 Windows，这里使用常用的 Win64 移植补丁或 MSYS2 环境
+      - name: Build for Windows x64
+        if: matrix.platform == 'windows-x64'
+        uses: msys2/setup-msys2@v2
+        with:
+          install: make gcc pkg-config
+      
+      - name: Compile on Windows
+        if: matrix.platform == 'windows-x64'
+        shell: msys2 {0}
+        run: |
+          # 尝试编译，Windows 下通常需要强制指定参数
+          make MALLOC=libc -j$env:NUMBER_OF_PROCESSORS
+
+      # --- 产物收集 ---
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-${{ matrix.version }}-${{ matrix.platform }}
+          path: |
+            src/redis-server
+            src/redis-server.exe
+            src/redis-cli
+            src/redis-cli.exe
