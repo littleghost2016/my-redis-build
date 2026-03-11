@@ -15,13 +15,11 @@ jobs:
     steps:
       - name: Prepare Environment
         run: |
-          # 1. 修复 Debian 10 归档源
           sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list
           sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list
           sed -i '/buster-updates/d' /etc/apt/sources.list
           
           apt-get update
-          # 安装编译工具和 RPM 打包工具
           apt-get install -y \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
@@ -30,7 +28,6 @@ jobs:
             git \
             ruby ruby-dev rubygems rpm
 
-          # 安装 fpm (用于快速生成 RPM)
           gem install --no-document fpm
 
       - name: Clone Redis 7.4
@@ -50,24 +47,20 @@ jobs:
 
       - name: Prepare Package Files
         run: |
-          # 创建 RPM 安装后的目录结构
           mkdir -p build/usr/bin/
           mkdir -p build/etc/redis/
           mkdir -p build/var/lib/redis/
           mkdir -p build/var/log/redis/
           mkdir -p build/usr/lib/systemd/system/
 
-          # 1. 复制二进制文件 (由于旧版在 /usr/sbin，这里建议复制两份或建立软链接)
           cp source/src/redis-server build/usr/bin/
           cp source/src/redis-cli build/usr/bin/
           cp source/src/redis-benchmark build/usr/bin/
           cp source/src/redis-check-rdb build/usr/bin/
           cp source/src/redis-check-aof build/usr/bin/
 
-          # 2. 复制配置文件 (使用 7.4 新版作为默认配置)
           cp source/redis.conf build/etc/redis/redis.conf.default
 
-          # 3. 创建 Systemd 服务文件 (兼容旧版服务名)
           cat <<EOF > build/usr/lib/systemd/system/redis.service
           [Unit]
           Description=Redis In-Memory Data Store (7.4)
@@ -87,9 +80,10 @@ jobs:
 
       - name: Build RPM Package
         run: |
-          # 使用 FPM 封装成 RPM
-          # --pre-install: 安装前创建 redis 用户
-          # --post-install: 安装后设置目录权限
+          # 将安装脚本写入文件以确保 Shell 兼容性
+          echo "useradd -r -s /sbin/nologin redis || true" > preinst.sh
+          echo "chown -R redis:redis /var/lib/redis /var/log/redis /etc/redis" > postinst.sh
+
           fpm -s dir -t rpm \
             -n redis \
             -v 7.4.0 \
@@ -97,9 +91,9 @@ jobs:
             --architecture aarch64 \
             --description "Redis 7.4.0 Stable for Kylin V10 ARM64 (GLIBC 2.28)" \
             -C build \
-            --before-install <(echo "useradd -r -s /sbin/nologin redis || true") \
-            --after-install <(echo "chown -R redis:redis /var/lib/redis /var/log/redis /etc/redis") \
-            usr/bin etc/redis var/lib/redis var/log/redis usr/lib/systemd/system/redis.service
+            --before-install preinst.sh \
+            --after-install postinst.sh \
+            usr/bin/ etc/redis/ var/lib/redis/ var/log/redis/ usr/lib/systemd/system/redis.service
 
       - name: Upload RPM
         uses: actions/upload-artifact@v4
