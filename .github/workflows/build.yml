@@ -1,67 +1,39 @@
-name: Ultimate Cross-Platform Redis Builder
+name: Build Latest Redis ARM64
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Redis Version (e.g. 5.0.5)'
-        required: true
-        default: '5.0.5'
+  workflow_dispatch: # 手动触发
 
 jobs:
-  build:
-    name: Build for ${{ matrix.target }}
+  build-arm64:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [linux-aarch64, windows-x64]
-
+    
     steps:
-      # --- 步骤 1: 根据目标平台选择合适的源码仓库 ---
-      - name: Checkout Source
-        uses: actions/checkout@v4
-        with:
-          # Linux ARM 使用官方仓库；Windows 使用适配过的 tporadowski 仓库
-          repository: ${{ matrix.target == 'linux-aarch64' && 'redis/redis' || 'tporadowski/redis' }}
-          ref: ${{ matrix.target == 'linux-aarch64' && github.event.inputs.version || 'v5.0.5' }}
-          fetch-depth: 1
-
-      # --- 步骤 2: 安装对应的交叉编译器 ---
-      - name: Install Compilers
+      - name: Install ARM64 Toolchain
         run: |
           sudo apt-get update
-          if [ "${{ matrix.target }}" = "linux-aarch64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu build-essential
-          else
-            sudo apt-get install -y gcc-mingw-w64-x86-64 build-essential
-          fi
+          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential
 
-      # --- 步骤 3: 核心编译逻辑 ---
-      - name: Compile Redis
+      - name: Checkout Latest Redis
+        uses: actions/checkout@v4
+        with:
+          repository: redis/redis
+          ref: stable # 始终指向最新稳定版
+          fetch-depth: 1
+
+      - name: Compile Redis for ARM64
         run: |
-          # 获取 CPU 核心数，防止 -j 后面出现空值
-          CPU_CORES=$(nproc)
-          
-          if [ "${{ matrix.target }}" = "linux-aarch64" ]; then
-            echo "Starting Linux ARM64 Build..."
-            make CC=aarch64-linux-gnu-gcc MALLOC=libc -j$CPU_CORES
-          else
-            echo "Starting Windows x64 Build..."
-            # 针对 Windows 移植版的编译指令，通常需要指定平台为 MINGW
-            # tporadowski 的版本在 Linux 下交叉编译建议使用其提供的方案或直接调用工具链
-            make CC=x86_64-w64-mingw32-gcc MALLOC=libc -j$CPU_CORES
-          fi
+          # 使用交叉编译器 aarch64-linux-gnu-gcc
+          # MALLOC=libc 提高跨环境兼容性
+          make CC=aarch64-linux-gnu-gcc MALLOC=libc -j$(nproc)
 
-      # --- 步骤 4: 收集产物 ---
-      - name: Upload Result
+      - name: Verify Architecture
+        run: file src/redis-server
+
+      - name: Upload ARM64 Binaries
         uses: actions/upload-artifact@v4
         with:
-          name: redis-${{ github.event.inputs.version }}-${{ matrix.target }}
+          name: redis-latest-linux-arm64
           path: |
             src/redis-server
-            src/redis-server.exe
             src/redis-cli
-            src/redis-cli.exe
-            src/redis-check-rdb
-            src/redis-check-rdb.exe
+            src/redis-benchmark
