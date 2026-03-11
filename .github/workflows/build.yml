@@ -1,31 +1,41 @@
-name: Build Redis 7.4 ARM64 (High Compatibility)
+name: Build Redis 7.4 for Kylin V10
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build-arm64:
-    # 关键修改：改用 Ubuntu 20.04，其 GLIBC 版本较低，兼容性更好
-    runs-on: ubuntu-20.04
+    # 宿主机用最新的，确保能秒开启任务
+    runs-on: ubuntu-latest
+    
+    # 核心黑科技：在宿主机里启动一个 Debian 10 容器
+    # Debian 10 的 GLIBC 正好是 2.28，与你的麒麟 V10 完全一致
+    container:
+      image: debian:10
     
     steps:
-      - name: Install ARM64 Toolchain
+      - name: Install Build Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          # 在容器内安装交叉编译器和必要工具
+          apt-get install -y \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            build-essential
+            build-essential \
+            git
 
-      - name: Manual Clone Redis 7.4
+      - name: Clone Redis 7.4
         run: |
           git clone --depth 1 --branch 7.4 https://github.com/redis/redis.git source
       
       - name: Compile Redis for ARM64
         working-directory: ./source
         run: |
-          # 依然使用之前的全工具链指定
+          # 传递完整的工具链参数，确保不产生架构冲突
           make \
             CC=aarch64-linux-gnu-gcc \
             CXX=aarch64-linux-gnu-g++ \
@@ -34,10 +44,19 @@ jobs:
             MALLOC=libc \
             -j$(nproc)
 
-      - name: Upload ARM64 Binaries
+      - name: Verify Binary
+        run: |
+          # 验证是否为 ARM64 且 GLIBC 版本需求是否 <= 2.28
+          apt-get install -y binutils
+          objdump -p source/src/redis-server | grep GLIBC_2
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: redis-7.4-kailin-v10-arm64
+          name: redis-7.4-kylin-v10-arm64
           path: |
             source/src/redis-server
             source/src/redis-cli
+            source/src/redis-benchmark
+            source/src/redis-check-rdb
+            source/src/redis-check-aof
