@@ -28,7 +28,8 @@ jobs:
             git \
             ruby ruby-dev rubygems rpm
 
-          gem install --no-document fpm
+          # 降级 fpm 以兼容 Debian 10 的旧版 Ruby
+          gem install --no-document fpm -v 1.15.0
 
       - name: Clone Redis 7.4
         run: |
@@ -80,7 +81,6 @@ jobs:
 
       - name: Build RPM Package
         run: |
-          # 将安装脚本写入文件以确保 Shell 兼容性
           echo "useradd -r -s /sbin/nologin redis || true" > preinst.sh
           echo "chown -R redis:redis /var/lib/redis /var/log/redis /etc/redis" > postinst.sh
 
