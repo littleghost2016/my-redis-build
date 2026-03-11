@@ -1,76 +1,67 @@
-name: Multi-Platform Redis Build
+name: Ultimate Cross-Platform Redis Builder
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Redis Version (e.g. 5.0.5, 7.2.4)'
+        description: 'Redis Version (e.g. 5.0.5)'
         required: true
         default: '5.0.5'
 
 jobs:
   build:
-    name: Build Redis ${{ github.event.inputs.version }} for ${{ matrix.platform }}
-    runs-on: ${{ matrix.os }}
+    name: Build for ${{ matrix.target }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: linux-aarch64
-            os: ubuntu-latest
-          - platform: windows-x64
-            os: windows-latest
+        target: [linux-aarch64, windows-x64]
 
     steps:
-      # 修复后的 Checkout：移除模糊匹配，确保引用唯一
-      - name: Checkout Redis Source
+      # --- 步骤 1: 根据目标平台选择合适的源码仓库 ---
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
-          repository: redis/redis
-          # 使用 github.event.inputs.version 确保获取用户输入的特定版本
-          ref: ${{ github.event.inputs.version }}
+          # Linux ARM 使用官方仓库；Windows 使用适配过的 tporadowski 仓库
+          repository: ${{ matrix.target == 'linux-aarch64' && 'redis/redis' || 'tporadowski/redis' }}
+          ref: ${{ matrix.target == 'linux-aarch64' && github.event.inputs.version || 'v5.0.5' }}
           fetch-depth: 1
 
-      # --- Linux ARM64 构建逻辑 ---
-      - name: Set up QEMU (Linux ARM64 only)
-        if: matrix.platform == 'linux-aarch64'
-        uses: docker/setup-qemu-action@v3
-
-      - name: Build for Linux ARM64
-        if: matrix.platform == 'linux-aarch64'
+      # --- 步骤 2: 安装对应的交叉编译器 ---
+      - name: Install Compilers
         run: |
-          docker run --rm --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            arm64v8/debian:buster \
-            /bin/bash -c "apt-get update && apt-get install -y build-essential && make MALLOC=libc -j$(nproc)"
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "linux-aarch64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu build-essential
+          else
+            sudo apt-get install -y gcc-mingw-w64-x86-64 build-essential
+          fi
 
-      # --- Windows x64 构建逻辑 (使用兼容性更好的环境) ---
-      - name: Build for Windows x64
-        if: matrix.platform == 'windows-x64'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          install: >-
-            make
-            mingw-w64-x86_64-gcc
-            pkg-config
-
-      - name: Compile on Windows
-        if: matrix.platform == 'windows-x64'
-        shell: msys2 {0}
+      # --- 步骤 3: 核心编译逻辑 ---
+      - name: Compile Redis
         run: |
-          # 针对 Windows 的特殊修复：官方源码不支持 Windows fork()
-          # 如果这里报错，建议使用 tporadowski/redis 仓库
-          make MALLOC=libc -j$(nproc) || echo "Official Redis might need patches for Windows"
+          # 获取 CPU 核心数，防止 -j 后面出现空值
+          CPU_CORES=$(nproc)
+          
+          if [ "${{ matrix.target }}" = "linux-aarch64" ]; then
+            echo "Starting Linux ARM64 Build..."
+            make CC=aarch64-linux-gnu-gcc MALLOC=libc -j$CPU_CORES
+          else
+            echo "Starting Windows x64 Build..."
+            # 针对 Windows 移植版的编译指令，通常需要指定平台为 MINGW
+            # tporadowski 的版本在 Linux 下交叉编译建议使用其提供的方案或直接调用工具链
+            make CC=x86_64-w64-mingw32-gcc MALLOC=libc -j$CPU_CORES
+          fi
 
-      # --- 产物收集 ---
-      - name: Upload Artifacts
+      # --- 步骤 4: 收集产物 ---
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: redis-${{ github.event.inputs.version }}-${{ matrix.platform }}
+          name: redis-${{ github.event.inputs.version }}-${{ matrix.target }}
           path: |
             src/redis-server
             src/redis-server.exe
             src/redis-cli
             src/redis-cli.exe
+            src/redis-check-rdb
+            src/redis-check-rdb.exe
