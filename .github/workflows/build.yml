@@ -5,7 +5,6 @@ on:
 
 jobs:
   build-arm64:
-    # 关键点：这里必须是 ubuntu-latest，确保进入 Linux 环境
     runs-on: ubuntu-latest
     
     steps:
@@ -14,16 +13,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential
 
-      - name: Checkout Redis
-        uses: actions/checkout@v4
-        with:
-          repository: redis/redis
-          ref: stable 
-          fetch-depth: 1
-
-      - name: Compile Redis for ARM64
+      - name: Manual Clone Redis
         run: |
-          # 现在在 Linux 环境下，$(nproc) 和路径都会正常工作
+          git clone --depth 1 --branch stable https://github.com/redis/redis.git source
+      
+      - name: Compile Redis for ARM64
+        working-directory: ./source
+        run: |
+          # 强制指定核心数，确保参数传递正确
           make CC=aarch64-linux-gnu-gcc MALLOC=libc -j$(nproc)
 
       - name: Upload ARM64 Binaries
@@ -31,5 +28,5 @@ jobs:
         with:
           name: redis-latest-linux-arm64
           path: |
-            src/redis-server
-            src/redis-cli
+            source/src/redis-server
+            source/src/redis-cli
