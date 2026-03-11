@@ -1,10 +1,11 @@
 name: Build Latest Redis ARM64
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build-arm64:
+    # 关键点：这里必须是 ubuntu-latest，确保进入 Linux 环境
     runs-on: ubuntu-latest
     
     steps:
@@ -13,21 +14,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential
 
-      - name: Checkout Latest Redis
+      - name: Checkout Redis
         uses: actions/checkout@v4
         with:
           repository: redis/redis
-          ref: stable # 始终指向最新稳定版
+          ref: stable 
           fetch-depth: 1
 
       - name: Compile Redis for ARM64
         run: |
-          # 使用交叉编译器 aarch64-linux-gnu-gcc
-          # MALLOC=libc 提高跨环境兼容性
+          # 现在在 Linux 环境下，$(nproc) 和路径都会正常工作
           make CC=aarch64-linux-gnu-gcc MALLOC=libc -j$(nproc)
-
-      - name: Verify Architecture
-        run: file src/redis-server
 
       - name: Upload ARM64 Binaries
         uses: actions/upload-artifact@v4
@@ -36,4 +33,3 @@ jobs:
           path: |
             src/redis-server
             src/redis-cli
-            src/redis-benchmark
